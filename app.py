@@ -3,83 +3,52 @@ import yfinance as yf
 import plotly.graph_objects as go
 import pandas as pd
 
-st.set_page_config(page_title="NSE 227 DEMA 9 LIVE", layout="wide", page_icon="📈")
-st.title("📈 NSE 227 - DEMA 9 LIVE Dashboard")
+st.set_page_config(page_title="NSE 227 DEMA 9 LIVE", layout="wide")
+st.title("NSE 227 - DEMA 9 LIVE")
 
-def dema(series, period):
-    ema1 = series.ewm(span=period, adjust=False).mean()
-    ema2 = ema1.ewm(span=period, adjust=False).mean()
-    return 2*ema1 - ema2
+def dema(s, p):
+    e1 = s.ewm(span=p, adjust=False).mean()
+    e2 = e1.ewm(span=p, adjust=False).mean()
+    return 2*e1 - e2
 
-@st.cache_data
-def load_excel():
-    try:
-        return pd.read_excel("All_227_Stocks_Financial_Analysis.xlsx")
-    except:
-        return None
-
-# Sidebar
-sym = st.sidebar.text_input("NSE Symbol", "RELIANCE").upper().strip()
-period = st.sidebar.selectbox("Period", ["1mo","3mo","6mo","1y","2y"], index=2)
-
+sym = st.sidebar.text_input("Symbol", "RELIANCE").upper().strip()
+per = st.sidebar.selectbox("Period", ["1mo","3mo","6mo","1y"], 2)
 yf_sym = sym if sym.endswith(".NS") else sym + ".NS"
-st.sidebar.write(f"Loading: {yf_sym}")
 
-try:
-    df = yf.download(yf_sym, period=period, interval="1d", progress=False, auto_adjust=True)
+df = yf.download(yf_sym, period=per, interval="1d", progress=False, auto_adjust=True)
+if isinstance(df.columns, pd.MultiIndex):
+    df.columns = df.columns.get_level_values(0)
 
-    # Fix columns if MultiIndex
-    if isinstance(df.columns, pd.MultiIndex):
-        df.columns = df.columns.get_level_values(0)
+if len(df) > 0:
+    df['DEMA9'] = dema(df['Close'], 9)
+    df['DEMA20'] = dema(df['Close'], 20)
+    df['DEMA50'] = dema(df['Close'], 50)
+    df['DEMA200'] = dema(df['Close'], 200)
 
-    if len(df) < 20:
-        st.warning("Not enough data for this symbol")
+    last = float(df['Close'].iloc[-1])
+    d9 = float(df['DEMA9'].iloc[-1])
+
+    c1, c2 = st.columns(2)
+    c1.metric("Price", f"{last:.2f}")
+    c2.metric("DEMA9", f"{d9:.2f}")
+
+    fig = go.Figure()
+    fig.add_trace(go.Candlestick(x=df.index, open=df['Open'], high=df['High'], low=df['Low'], close=df['Close'], name="Price"))
+    fig.add_trace(go.Scatter(x=df.index, y=df['DEMA9'], line=dict(color='yellow', width=2), name='DEMA 9'))
+    fig.add_trace(go.Scatter(x=df.index, y=df['DEMA20'], line=dict(color='orange'), name='DEMA 20'))
+    fig.add_trace(go.Scatter(x=df.index, y=df['DEMA50'], line=dict(color='cyan'), name='DEMA 50'))
+    fig.add_trace(go.Scatter(x=df.index, y=df['DEMA200'], line=dict(color='red'), name='DEMA 200'))
+    fig.update_layout(height=600, template="plotly_dark", xaxis_rangeslider_visible=False)
+    st.plotly_chart(fig, use_container_width=True)
+
+    fig2 = go.Figure()
+    fig2.add_trace(go.Bar(x=df.index, y=df['Volume'], name="Volume"))
+    fig2.update_layout(height=200, template="plotly_dark")
+    st.plotly_chart(fig2, use_container_width=True)
+
+    if last > d9:
+        st.success("BULLISH - Above DEMA 9")
     else:
-        # Calculate DEMA 9, 20, 50, 200
-        df['DEMA_9'] = dema(df['Close'], 9)
-        df['DEMA_20'] = dema(df['Close'], 20)
-        df['DEMA_50'] = dema(df['Close'], 50)
-        df['DEMA_200'] = dema(df['Close'], 200)
-
-        # RSI
-        delta = df['Close'].diff()
-        gain = delta.where(delta > 0, 0).rolling(14).mean()
-        loss = -delta.where(delta < 0, 0).rolling(14).mean()
-        rs = gain / loss
-        df['RSI'] = 100 - (100 / (1 + rs))
-
-        last_price = float(df['Close'].iloc[-1])
-        last_dema9 = float(df['DEMA_9'].iloc[-1])
-        last_dema20 = float(df['DEMA_20'].iloc[-1])
-        last_rsi = float(df['RSI'].iloc[-1])
-
-        # Metrics
-        col1, col2, col3, col4 = st.columns(4)
-        col1.metric("Price", f"₹{last_price:.2f}")
-        col2.metric("DEMA 9", f"₹{last_dema9:.2f}", f"{last_price-last_dema9:.2f}")
-        col3.metric("RSI 14", f"{last_rsi:.1f}")
-        col4.metric("Trend", "BULLISH" if last_price > last_dema9 else "BEARISH")
-
-        # Main Chart - Candlestick + DEMA 9
-        fig = go.Figure()
-        fig.add_trace(go.Candlestick(
-            x=df.index, open=df['Open'], high=df['High'],
-            low=df['Low'], close=df['Close'], name="Candles"
-        ))
-        fig.add_trace(go.Scatter(x=df.index, y=df['DEMA_9'], mode='lines', line=dict(color='yellow', width=2.5), name='DEMA 9'))
-        fig.add_trace(go.Scatter(x=df.index, y=df['DEMA_20'], mode='lines', line=dict(color='orange', width=1.5), name='DEMA 20'))
-        fig.add_trace(go.Scatter(x=df.index, y=df['DEMA_50'], mode='lines', line=dict(color='#00BFFF', width=1.5), name='DEMA 50'))
-        fig.add_trace(go.Scatter(x=df.index, y=df['DEMA_200'], mode='lines', line=dict(color='red', width=1.5), name='DEMA 200'))
-
-        fig.update_layout(
-            height=700, template="plotly_dark",
-            xaxis_rangeslider_visible=False,
-            title=f"{yf_sym} - DEMA 9 LIVE",
-            legend=dict(orientation="h", y=1.02)
-        )
-        st.plotly_chart(fig, use_container_width=True)
-
-        # Volume Chart
-        colors = ['#00ff88' if df['Close'].iloc[i] >= df['Open'].iloc[i] else '#ff4444' for i in range(len(df))]
-        fig_vol = go.Figure(data=[go.Bar(x=df.index, y=df['Volume'], marker_color=colors, name="Volume")])pm
-
+        st.error("BEARISH - Below DEMA 9")
+else:
+    st.error("No data")
