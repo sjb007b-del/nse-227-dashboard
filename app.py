@@ -31,8 +31,7 @@ def rsi(s):
 
 def levels(df):
     if len(df)<20: return None
-    lo=float(df['Low'].tail(20).min())
-    hi=float(df['High'].tail(20).max())
+    lo=float(df['Low'].tail(20).min()); hi=float(df['High'].tail(20).max())
     dL=lo*0.97; dH=lo*1.03; sL=hi*0.97; sH=hi*1.03
     r=float(rsi(df['Close']).iloc[-1]) if len(df)>14 else 50
     last=float(df['Close'].iloc[-1])
@@ -77,15 +76,26 @@ else:
     st.divider()
     sel=st.selectbox("Select Stock for Chart", fl['Stock'].tolist() if len(fl)>0 else live['Stock'].tolist())
     row=live[live['Stock']==sel].iloc[0]
-    df=yf.download(f"{row['Ticker']}.NS", period="3mo", progress=False, auto_adjust=True)
+
+    @st.cache_data(ttl=300)
+    def get_candle(t):
+        for s in [f"{t}.NS", f"{t}.BO"]:
+            try:
+                df=yf.download(s, period="6mo", progress=False, auto_adjust=False)
+                if not df.empty and len(df)>20:
+                    return df.dropna()
+            except: pass
+        return pd.DataFrame()
+
+    df=get_candle(row['Ticker'])
     if not df.empty:
         df=df.dropna()
         fig=go.Figure()
-        fig.add_trace(go.Candlestick(x=df.index, open=df['Open'], high=df['High'], low=df['Low'], close=df['Close'], name="Candle", increasing_line_color='lime', decreasing_line_color='red'))
+        fig.add_trace(go.Candlestick(x=df.index, open=df['Open'], high=df['High'], low=df['Low'], close=df['Close'], name="Candle", increasing_line_color='lime', increasing_fillcolor='lime', decreasing_line_color='red', decreasing_fillcolor='red'))
         fig.add_trace(go.Scatter(x=df.index, y=df['Close'], line=dict(color='white', width=1), name="Close"))
         fig.add_hline(y=row['Support'], line_dash="dash", line_color="green")
         fig.add_hline(y=row['Resistance'], line_dash="dash", line_color="red")
-        fig.add_shape(type="rect", x0=df.index[-20], x1=df.index[-1], y0=row['_dL'], y1=row['_dH'], fillcolor="rgba(0,255,0,0.2)", line=dict(color="green"))
-        fig.add_shape(type="rect", x0=df.index[-20], x1=df.index[-1], y0=row['_sL'], y1=row['_sH'], fillcolor="rgba(255,0,0,0.2)", line=dict(color="red"))
-        fig.update_layout(title=f"{sel} CMP {row['CMP']} {row['Signal']} RSI {row['RSI']}", xaxis_rangeslider_visible=False, height=500, template="plotly_dark")
+        fig.add_shape(type="rect", x0=df.index[-20], x1=df.index[-1], y0=row['_dL'], y1=row['_dH'], fillcolor="rgba(0,255,0,0.25)", line=dict(color="green", width=2))
+        fig.add_shape(type="rect", x0=df.index[-20], x1=df.index[-1], y0=row['_sL'], y1=row['_sH'], fillcolor="rgba(255,0,0,0.25)", line=dict(color="red", width=2))
+        fig.update_layout(title=f"{sel} CMP {row['CMP']} {row['Signal']} RSI {row['RSI']} {row['Setup']}", xaxis_rangeslider_visible=False, height=600, template="plotly_dark", yaxis=dict(range=[row['_dL']*0.93, row['_sH']*1.07]))
         st.plotly_chart(fig, use_container_width=True)
